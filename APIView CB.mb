@@ -1,1 +1,129 @@
 
+views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.shortcuts import get_object_or_404
+from django.contrib.auth.models import User
+from .models import Snippet
+from .serializers import SnippetSerializer, RegisterSerializer, UserSerializer
+
+
+# Custom permission to check snippet ownership
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return request.method in permissions.SAFE_METHODS or obj.owner == request.user
+
+
+# Snippet List/Create View
+class SnippetList(APIView):
+    def get(self, request):
+        snippets = Snippet.objects.all()
+        serializer = SnippetSerializer(snippets, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        serializer = SnippetSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(owner=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Snippet Detail View
+class SnippetDetail(APIView):
+    permission_classes = [IsOwnerOrReadOnly]
+
+    def get_object(self, pk):
+        return get_object_or_404(Snippet, pk=pk)
+
+    def get(self, request, pk):
+        snippet = self.get_object(pk)
+        serializer = SnippetSerializer(snippet)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        snippet = self.get_object(pk)
+        self.check_object_permissions(request, snippet)
+        serializer = SnippetSerializer(snippet, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        snippet = self.get_object(pk)
+        self.check_object_permissions(request, snippet)
+        snippet.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Register new users
+class RegisterUser(APIView):
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message": "User registered successfully!"}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# List all users (only authenticated)
+class UserList(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        users = User.objects.all()
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
+
+serializer.py
+from django.contrib.auth.models import User
+from rest_framework import serializers
+from .models import Snippet
+
+
+class SnippetSerializer(serializers.ModelSerializer):
+    owner = serializers.ReadOnlyField(source='owner.username')
+
+    class Meta:
+        model = Snippet
+        fields = ['id', 'title', 'code', 'created', 'owner']
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'password']
+
+    def create(self, validated_data):
+        return User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data.get('email'),
+            password=validated_data['password']
+        )
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email']
+
+
+urls.py
+from django.urls import path
+from .views import SnippetList, SnippetDetail, RegisterUser, UserList
+
+urlpatterns = [
+    path('snippets/', SnippetList.as_view(), name='snippet-list'),
+    path('snippets/<int:pk>/', SnippetDetail.as_view(), name='snippet-detail'),
+    path('register/', RegisterUser.as_view(), name='register'),
+    path('users/', UserList.as_view(), name='user-list'),
+]
+
+
