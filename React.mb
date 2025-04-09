@@ -1,0 +1,66 @@
+npx create-react-app frontend
+cd frontend
+npm install axios react-router-dom
+
+apicall.
+src/api/axios.js
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: 'http://localhost:8000/api/',  // your Django API root
+  withCredentials: true,  // needed for session-based login
+});
+
+export default api;
+
+
+// frontend/src/pages/SnippetList.js
+import React, { useEffect, useState } from 'react';
+import api from '../api/axios';
+
+function SnippetList() {
+  const [snippets, setSnippets] = useState([]);
+
+  useEffect(() => {
+    api.get('snippets/')
+      .then(res => setSnippets(res.data))
+      .catch(err => console.error(err));
+  }, []);
+
+  return (
+    <div>
+      <h2>Snippets</h2>
+      <ul>
+        {snippets.map(snippet => (
+          <li key={snippet.id}>{snippet.title}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default SnippetList;
+
+
+// frontend/src/App.js
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import SnippetList from './pages/SnippetList';
+import Login from './pages/Login';
+import Register from './pages/Register';
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<SnippetList />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+      </Routes>
+    </Router>
+  );
+}
+
+export default App;
+
+
