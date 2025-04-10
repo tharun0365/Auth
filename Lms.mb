@@ -1,0 +1,245 @@
+pip install django djangorestframework djangorestframework-simplejwt
+
+django-admin startproject library_project
+cd library_project
+python manage.py startapp library_app
+
+
+config:
+INSTALLED_APPS = [
+    ...
+    'rest_framework',
+    'library_app',
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
+models:
+from django.db import models
+from django.contrib.auth.models import User
+
+class Book(models.Model):
+    title = models.CharField(max_length=255)
+    author = models.CharField(max_length=255)
+    isbn = models.CharField(max_length=13, unique=True)
+    available = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+class Borrow(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    book = models.ForeignKey(Book, on_delete=models.CASCADE)
+    borrowed_at = models.DateTimeField(auto_now_add=True)
+    returned = models.BooleanField(default=False)
+    returned_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username} borrowed {self.book.title}"
+
+class UserProfile(models.Model):
+    ROLE_CHOICES = (
+        ('librarian', 'Librarian'),
+        ('member', 'Member'),
+    )
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='member')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.role}"
+
+
+signal:
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.auth.models import User
+from .models import UserProfile
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+apps.py    
+
+def ready(self):
+    import library_app.signals
+
+serializer:
+
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from .models import Book, Borrow
+
+class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+    role = serializers.ChoiceField(choices=[('librarian', 'Librarian'), ('member', 'Member')])
+
+    class Meta:
+        model = User
+        fields = ['username', 'password', 'role']
+
+    def create(self, validated_data):
+        role = validated_data.pop('role')
+        user = User.objects.create_user(**validated_data)
+        user.userprofile.role = role
+        user.userprofile.save()
+        return user
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = '__all__'
+
+class BorrowSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Borrow
+        fields = '__all__'
+        read_only_fields = ['user', 'borrowed_at', 'returned_at']
+
+
+permission:
+
+from rest_framework import permissions
+
+class IsLibrarian(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated
+            and hasattr(request.user, 'userprofile')
+            and request.user.userprofile.role == 'librarian'
+        )
+
+
+views:
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.contrib.auth import logout
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils import timezone
+from .models import Book, Borrow
+from .serializers import UserSerializer, BookSerializer, BorrowSerializer
+from .permissions import IsLibrarian
+
+class RegisterView(APIView):
+    def post(self, request):
+        serializer = UserSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': 'User registered'}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data['refresh']
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            logout(request)
+            return Response({"message": "Logged out"}, status=status.HTTP_205_RESET_CONTENT)
+        except Exception:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+class BookListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        books = Book.objects.all()
+        serializer = BookSerializer(books, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not IsLibrarian().has_permission(request, self):
+            return Response({'error': 'Only librarians can add books'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = BookSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BorrowBookView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, book_id):
+        try:
+            book = Book.objects.get(id=book_id)
+            if not book.available:
+                return Response({'error': 'Book not available'}, status=status.HTTP_400_BAD_REQUEST)
+            Borrow.objects.create(user=request.user, book=book)
+            book.available = False
+            book.save()
+            return Response({'message': 'Book borrowed'})
+        except Book.DoesNotExist:
+            return Response({'error': 'Book not found'}, status=status.HTTP_404_NOT_FOUND)
+
+class ReturnBookView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, book_id):
+        try:
+            borrow = Borrow.objects.get(book__id=book_id, user=request.user, returned=False)
+            borrow.returned = True
+            borrow.returned_at = timezone.now()
+            borrow.save()
+            book = borrow.book
+            book.available = True
+            book.save()
+            return Response({'message': 'Book returned'})
+        except Borrow.DoesNotExist:
+            return Response({'error': 'No borrow record found'}, status=status.HTTP_404_NOT_FOUND)
+
+class MyBorrowedBooksView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        borrows = Borrow.objects.filter(user=request.user, returned=False)
+        serializer = BorrowSerializer(borrows, many=True)
+        return Response(serializer.data)
+
+
+
+urls:
+
+from django.urls import path
+from .views import (
+    RegisterView, LogoutView, BookListCreateView,
+    BorrowBookView, ReturnBookView, MyBorrowedBooksView
+)
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+urlpatterns = [
+    path('register/', RegisterView.as_view()),
+    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('logout/', LogoutView.as_view(), name='logout'),
+    path('books/', BookListCreateView.as_view()),
+    path('books/<int:book_id>/borrow/', BorrowBookView.as_view()),
+    path('books/<int:book_id>/return/', ReturnBookView.as_view()),
+    path('my-borrows/', MyBorrowedBooksView.as_view()),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+]
+
+
+url.py/pr
+
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('library_app.urls')),
+]
+
+
+
+python manage.py makemigrations
+python manage.py migrate
+python manage.py createsuperuser  # optional
+python manage.py runserver
