@@ -1,0 +1,133 @@
+LMS - Library Management System (DRF + APIView + JWT + Session Login + UserProfile)
+
+--- models.py ---
+
+from django.db import models from django.contrib.auth.models import User
+
+class UserProfile(models.Model): ROLE_CHOICES = ( ('member', 'Member'), ('librarian', 'Librarian'), ) user = models.OneToOneField(User, on_delete=models.CASCADE) role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
+
+def __str__(self):
+    return f"{self.user.username} - {self.role}"
+
+class Book(models.Model): title = models.CharField(max_length=200) author = models.CharField(max_length=200) is_borrowed = models.BooleanField(default=False)
+
+def __str__(self):
+    return self.title
+
+class Borrow(models.Model): user = models.ForeignKey(User, on_delete=models.CASCADE) book = models.ForeignKey(Book, on_delete=models.CASCADE) borrow_date = models.DateField(auto_now_add=True) return_date = models.DateField(null=True, blank=True)
+
+--- signals.py ---
+
+from django.db.models.signals import post_save from django.dispatch import receiver from django.contrib.auth.models import User from .models import UserProfile
+
+@receiver(post_save, sender=User) def create_user_profile(sender, instance, created, **kwargs): if created: UserProfile.objects.create(user=instance)
+
+--- apps.py ---
+
+from django.apps import AppConfig
+
+class LibraryAppConfig(AppConfig): default_auto_field = 'django.db.models.BigAutoField' name = 'library_app'
+
+def ready(self):
+    import library_app.signals
+
+--- init.py ---
+
+default_app_config = 'library_app.apps.LibraryAppConfig'
+
+--- serializers.py ---
+
+from rest_framework import serializers from django.contrib.auth.models import User from .models import UserProfile, Book, Borrow
+
+class RegisterSerializer(serializers.ModelSerializer): role = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES, write_only=True)
+
+class Meta:
+    model = User
+    fields = ['username', 'email', 'password', 'role']
+    extra_kwargs = {'password': {'write_only': True}}
+
+def create(self, validated_data):
+    role = validated_data.pop('role')
+    user = User.objects.create_user(**validated_data)
+    profile, created = UserProfile.objects.get_or_create(user=user)
+    profile.role = role
+    profile.save()
+    return user
+
+class BookSerializer(serializers.ModelSerializer): class Meta: model = Book fields = 'all'
+
+class BorrowSerializer(serializers.ModelSerializer): class Meta: model = Borrow fields = 'all'
+
+--- views.py ---
+
+from rest_framework.views import APIView from rest_framework.response import Response from rest_framework import status, permissions from django.utils import timezone from .serializers import RegisterSerializer, BookSerializer, BorrowSerializer from .models import Book, Borrow
+
+class RegisterView(APIView): def post(self, request): serializer = RegisterSerializer(data=request.data) if serializer.is_valid(): serializer.save() return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED) return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BookListCreateView(APIView): permission_classes = [permissions.IsAuthenticated]
+
+def get(self, request):
+    books = Book.objects.all()
+    serializer = BookSerializer(books, many=True)
+    return Response(serializer.data)
+
+def post(self, request):
+    if request.user.userprofile.role != 'librarian':
+        return Response({'error': 'Only librarians can add books'}, status=status.HTTP_403_FORBIDDEN)
+    serializer = BookSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BorrowBookView(APIView): permission_classes = [permissions.IsAuthenticated]
+
+def post(self, request, book_id):
+    try:
+        book = Book.objects.get(id=book_id)
+        if book.is_borrowed:
+            return Response({'error': 'Book already borrowed'}, status=400)
+        book.is_borrowed = True
+        book.save()
+        Borrow.objects.create(user=request.user, book=book)
+        return Response({'message': 'Book borrowed'}, status=200)
+    except Book.DoesNotExist:
+        return Response({'error': 'Book not found'}, status=404)
+
+class ReturnBookView(APIView): permission_classes = [permissions.IsAuthenticated]
+
+def post(self, request, book_id):
+    try:
+        borrow = Borrow.objects.get(book_id=book_id, user=request.user, return_date__isnull=True)
+        borrow.return_date = timezone.now().date()
+        borrow.save()
+        borrow.book.is_borrowed = False
+        borrow.book.save()
+        return Response({'message': 'Book returned'}, status=200)
+    except Borrow.DoesNotExist:
+        return Response({'error': 'Borrow record not found'}, status=404)
+
+--- urls.py (app level) ---
+
+from django.urls import path from .views import RegisterView, BookListCreateView, BorrowBookView, ReturnBookView from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+urlpatterns = [ path('register/', RegisterView.as_view()), path('login/', TokenObtainPairView.as_view()), path('token/refresh/', TokenRefreshView.as_view()), path('books/', BookListCreateView.as_view()), path('borrow/int:book_id/', BorrowBookView.as_view()), path('return/int:book_id/', ReturnBookView.as_view()), ]
+
+--- main urls.py (project level) ---
+
+from django.contrib import admin from django.urls import path, include
+
+urlpatterns = [ path('admin/', admin.site.urls), path('api/', include('library_app.urls')), path('api-auth/', include('rest_framework.urls')),  # Enables session login in DRF UI ]
+
+--- settings.py additions ---
+
+INSTALLED_APPS = [ ... 'rest_framework', 'rest_framework_simplejwt', 'library_app', ]
+
+REST_FRAMEWORK = { 'DEFAULT_AUTHENTICATION_CLASSES': [ 'rest_framework.authentication.SessionAuthentication',  # For DRF login/logout in UI 'rest_framework_simplejwt.authentication.JWTAuthentication', ], }
+
+Don't forget to run:
+
+python manage.py makemigrations
+
+python manage.py migrate
+
