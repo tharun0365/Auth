@@ -1,0 +1,44 @@
+LMS FIXED CODE with PROFILE creation via SIGNAL
+
+-----------------------------------------------
+
+1. models.py
+
+from django.db import models from django.contrib.auth.models import User
+
+class Profile(models.Model): ROLE_CHOICES = ( ('member', 'Member'), ('librarian', 'Librarian') ) user = models.OneToOneField(User, on_delete=models.CASCADE) role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
+
+def __str__(self):
+    return f"{self.user.username} - {self.role}"
+
+2. signals.py (CREATE this file inside your app folder)
+
+from django.db.models.signals import post_save from django.dispatch import receiver from django.contrib.auth.models import User from .models import Profile
+
+@receiver(post_save, sender=User) def create_user_profile(sender, instance, created, **kwargs): if created: Profile.objects.create(user=instance)
+
+3. apps.py (UPDATE your app config file)
+
+from django.apps import AppConfig
+
+class LibraryAppConfig(AppConfig):  # Replace with your actual app name default_auto_field = 'django.db.models.BigAutoField' name = 'library_app'  # Replace with your app name
+
+def ready(self):
+    import library_app.signals  # This line loads your signal
+
+4. views.py (SAFE REGISTER view)
+
+from rest_framework.views import APIView from rest_framework.response import Response from rest_framework import status from django.contrib.auth.models import User from .models import Profile from .serializers import UserSerializer  # Assume you have this
+
+class RegisterView(APIView): def post(self, request): serializer = UserSerializer(data=request.data) if serializer.is_valid(): user = serializer.save()
+
+# SAFE WAY: make sure profile is created or already exists
+        profile, created = Profile.objects.get_or_create(user=user)
+        return Response({"message": "User registered successfully"}, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+5. settings.py (Ensure this exists in REST_FRAMEWORK settings)
+
+REST_FRAMEWORK = { 'DEFAULT_AUTHENTICATION_CLASSES': [ 'rest_framework.authentication.SessionAuthentication', 'rest_framework_simplejwt.authentication.JWTAuthentication', ] }
+
