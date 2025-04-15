@@ -126,3 +126,97 @@ return ( <div> <h2>Books</h2> {role === 'librarian' && <button onClick={addBook}
 
 export default BookList;
 
+books detail.jx
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+
+const BookDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [book, setBook] = useState(null);
+  const [updatedBook, setUpdatedBook] = useState({ title: '', author: '' });
+  const token = localStorage.getItem('access');
+
+  useEffect(() => {
+    fetch(`http://localhost:8000/api/books/${id}/`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        setBook(data);
+        setUpdatedBook({ title: data.title, author: data.author });
+      });
+  }, [id, token]);
+
+  const handleChange = e => {
+    setUpdatedBook({ ...updatedBook, [e.target.name]: e.target.value });
+  };
+
+  const handleUpdate = () => {
+    fetch(`http://localhost:8000/api/books/${id}/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(updatedBook)
+    })
+      .then(res => {
+        if (res.ok) {
+          alert('Book updated!');
+          navigate('/books');
+        } else {
+          alert('Update failed!');
+        }
+      });
+  };
+
+  const handleDelete = () => {
+    fetch(`http://localhost:8000/api/books/${id}/`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }).then(() => {
+      alert('Book deleted!');
+      navigate('/books');
+    });
+  };
+
+  if (!book) return <p>Loading...</p>;
+
+  return (
+    <div className="container">
+      <h2>Book Details</h2>
+      <p><strong>Title:</strong> {book.title}</p>
+      <p><strong>Author:</strong> {book.author}</p>
+
+      <h3>Update Book</h3>
+      <input name="title" value={updatedBook.title} onChange={handleChange} />
+      <input name="author" value={updatedBook.author} onChange={handleChange} />
+      <button onClick={handleUpdate}>Update</button>
+      <button onClick={handleDelete}>Delete</button>
+    </div>
+  );
+};
+
+export default BookDetail;
+
+app.jsx
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import BookDetail from './components/BookDetail';
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/books/:id" element={<BookDetail />} />
+        {/* Other routes */}
+      </Routes>
+    </Router>
+  );
+}
+
+export default App;
