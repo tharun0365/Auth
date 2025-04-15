@@ -1,0 +1,128 @@
+//install process 
+npm create vite@latest lms-frontend --template react
+cd lms-frontend
+npm install
+
+npm install axios react-router-dom
+
+npm install react-router-dom
+
+npm install axios
+
+npm run dev
+
+
+//dependencies 
+// vite.config.js
+
+export default {
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8000',
+    },
+  },
+};
+
+//things to install on django side
+pip install django-cors-headers
+
+INSTALLED_APPS = [
+    ...,
+    'corsheaders',
+]
+
+MIDDLEWARE = [
+    ...,
+    'corsheaders.middleware.CorsMiddleware',
+]
+
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+
+INSTALLED_APPS = [
+    ...,
+    'rest_framework_simplejwt',
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+}
+
+
+
+
+
+
+
+// main.jsx import React from 'react'; import ReactDOM from 'react-dom/client'; import App from './App'; import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render( <React.StrictMode> <App /> </React.StrictMode> );
+
+// App.jsx import React from 'react'; import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom'; import Login from './components/Login'; import Register from './components/Register'; import BookList from './components/BookList'; import NavBar from './components/NavBar';
+
+function App() { return ( <Router> <NavBar /> <Routes> <Route path="/" element={<Navigate to="/books" />} /> <Route path="/login" element={<Login />} /> <Route path="/register" element={<Register />} /> <Route path="/books" element={<BookList />} /> </Routes> </Router> ); }
+
+export default App;
+
+// utils/api.js const API_URL = 'http://localhost:8000/api';
+
+export const getAccessToken = () => localStorage.getItem('access'); export const getRefreshToken = () => localStorage.getItem('refresh');
+
+export const refreshToken = async () => { const response = await fetch(${API_URL}/token/refresh/, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh: getRefreshToken() }) }); if (response.ok) { const data = await response.json(); localStorage.setItem('access', data.access); return data.access; } else { localStorage.clear(); return null; } };
+
+export const authFetch = async (url, options = {}) => { let access = getAccessToken(); let res = await fetch(${API_URL}${url}, { ...options, headers: { ...(options.headers || {}), 'Authorization': Bearer ${access}, 'Content-Type': 'application/json' } }); if (res.status === 401) { access = await refreshToken(); if (!access) return res; res = await fetch(${API_URL}${url}, { ...options, headers: { ...(options.headers || {}), 'Authorization': Bearer ${access}, 'Content-Type': 'application/json' } }); } return res; };
+
+// components/NavBar.jsx import React from 'react'; import { Link, useNavigate } from 'react-router-dom';
+
+const NavBar = () => { const navigate = useNavigate(); const handleLogout = () => { localStorage.clear(); navigate('/login'); };
+
+const role = localStorage.getItem('role'); const isLoggedIn = !!localStorage.getItem('access');
+
+return ( <nav style={{ display: 'flex', gap: '1rem', padding: '1rem' }}> {isLoggedIn ? ( <> <Link to="/books">Books</Link> <button onClick={handleLogout}>Logout</button> </> ) : ( <> <Link to="/login">Login</Link> <Link to="/register">Register</Link> </> )} </nav> ); };
+
+export default NavBar;
+
+// components/Login.jsx import React, { useState } from 'react'; import { useNavigate } from 'react-router-dom';
+
+const Login = () => { const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const navigate = useNavigate();
+
+const handleLogin = async () => { const res = await fetch('http://localhost:8000/api/login/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }); if (res.ok) { const data = await res.json(); localStorage.setItem('access', data.access); localStorage.setItem('refresh', data.refresh); // get role (extra call or include in JWT decoded) const roleRes = await fetch('http://localhost:8000/api/books/', { headers: { Authorization: Bearer ${data.access} } }); if (roleRes.status !== 401) { localStorage.setItem('role', 'member'); // default or decoded from JWT } navigate('/books'); } else { alert('Login failed'); } };
+
+return ( <div> <h2>Login</h2> <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" /><br/> <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" /><br/> <button onClick={handleLogin}>Login</button> </div> ); };
+
+export default Login;
+
+// components/Register.jsx import React, { useState } from 'react';
+
+const Register = () => { const [formData, setFormData] = useState({ username: '', email: '', password: '', role: 'member' });
+
+const handleChange = e => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+const handleRegister = async () => { const res = await fetch('http://localhost:8000/api/register/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) }); if (res.ok) { alert('Registered successfully'); } else { alert('Registration failed'); } };
+
+return ( <div> <h2>Register</h2> <input name="username" onChange={handleChange} placeholder="Username" /><br/> <input name="email" onChange={handleChange} placeholder="Email" /><br/> <input name="password" type="password" onChange={handleChange} placeholder="Password" /><br/> <select name="role" onChange={handleChange}> <option value="member">Member</option> <option value="librarian">Librarian</option> </select><br/> <button onClick={handleRegister}>Register</button> </div> ); };
+
+export default Register;
+
+// components/BookList.jsx import React, { useEffect, useState } from 'react'; import { authFetch } from '../utils/api';
+
+const BookList = () => { const [books, setBooks] = useState([]); const role = localStorage.getItem('role');
+
+const fetchBooks = async () => { const res = await authFetch('/books/'); const data = await res.json(); setBooks(data); };
+
+const borrowBook = async (id) => { await authFetch(/borrow/${id}/, { method: 'POST' }); fetchBooks(); };
+
+const returnBook = async (id) => { await authFetch(/return/${id}/, { method: 'POST' }); fetchBooks(); };
+
+const addBook = async () => { const title = prompt('Title?'); const author = prompt('Author?'); await authFetch('/books/', { method: 'POST', body: JSON.stringify({ title, author }) }); fetchBooks(); };
+
+useEffect(() => { fetchBooks(); }, []);
+
+return ( <div> <h2>Books</h2> {role === 'librarian' && <button onClick={addBook}>Add Book</button>} <ul> {books.map(book => ( <li key={book.id}> {book.title} by {book.author} - {book.is_borrowed ? 'Borrowed' : 'Available'} {book.is_borrowed ? ( <button onClick={() => returnBook(book.id)}>Return</button> ) : ( <button onClick={() => borrowBook(book.id)}>Borrow</button> )} </li> ))} </ul> </div> ); };
+
+export default BookList;
+
