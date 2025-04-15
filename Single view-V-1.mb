@@ -1,0 +1,158 @@
+class BookView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, book_id=None):
+        if book_id:
+            try:
+                book = Book.objects.get(id=book_id)
+                serializer = BookSerializer(book)
+                return Response(serializer.data)
+            except Book.DoesNotExist:
+                return Response({'error': 'Book not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            books = Book.objects.all()
+            serializer = BookSerializer(books, many=True)
+            return Response(serializer.data)
+
+    def post(self, request, book_id=None):
+        if request.user.role != 'librarian':
+            return Response({'error': 'Only librarians can add books'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = BookSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, book_id=None):
+        if request.user.role != 'librarian':
+            return Response({'error': 'Only librarians can update books'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            book = Book.objects.get(id=book_id)
+            serializer = BookSerializer(book, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Book.DoesNotExist:
+            return Response({'error': 'Book not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, book_id=None):
+        if request.user.role != 'librarian':
+            return Response({'error': 'Only librarians can delete books'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            book = Book.objects.get(id=book_id)
+            book.delete()
+            return Response({'message': 'Book deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except Book.DoesNotExist:
+            return Response({'error': 'Book not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class BorrowReturnBookView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, book_id):
+        action = request.query_params.get('action')  # expects 'borrow' or 'return'
+
+        if action == 'borrow':
+            try:
+                book = Book.objects.get(id=book_id)
+                if not book.available:
+                    return Response({'error': 'Book already borrowed'}, status=400)
+                book.available = False
+                book.save()
+                Borrow.objects.create(user=request.user, book=book)
+                return Response({'message': 'Book borrowed'}, status=200)
+            except Book.DoesNotExist:
+                return Response({'error': 'Book not found'}, status=404)
+
+        elif action == 'return':
+            try:
+                borrow = Borrow.objects.get(book_id=book_id, user=request.user, return_date__isnull=True)
+                borrow.return_date = timezone.now().date()
+                borrow.save()
+                borrow.book.available = True
+                borrow.book.save()
+                return Response({'message': 'Book returned'}, status=200)
+            except Borrow.DoesNotExist:
+                return Response({'error': 'Borrow record not found'}, status=404)
+
+        else:
+            return Response({'error': 'Invalid action. Use ?action=borrow or ?action=return'}, status=400)
+
+
+    urls:
+
+    from django.urls import path, re_path
+from .views import BookView, BorrowReturnBookView
+
+urlpatterns = [
+    # This single path handles both /books/ and /books/<book_id>/
+    re_path(r'^books(?:/(?P<book_id>\d+))?/$', BookView.as_view(), name='book-view'),
+
+    # Borrow/return endpoint
+    path('books/<int:book_id>/borrow-return/', BorrowReturnBookView.as_view(), name='borrow-return-book'),
+]
+
+
+
+
+---
+
+1. re_path(r'^books(?:/(?P<book_id>\d+))?/$', ...)
+
+a. r'^books'
+
+The r before the string indicates a raw string, meaning special characters like \ are treated literally (avoiding escape sequence problems).
+
+^books means the pattern starts with books.
+
+
+b. (?:...)
+
+The (?:...) is a non-capturing group. This means the part inside the parentheses is optional, but we don’t want to save it for later use.
+
+It’s used to group parts of the pattern but without capturing them.
+
+
+c. /(?P<book_id>\d+)
+
+This part means /book_id/ where book_id is a number (\d+ means one or more digits).
+
+(?P<book_id>\d+) is a named capture group, meaning it captures a numeric ID (\d+) and stores it as book_id.
+
+
+d. ?
+
+The ? after the non-capturing group makes the entire /book_id/ part optional.
+
+This means the URL could be /books/ (for listing books) or /books/5/ (for a specific book detail, where 5 is the book_id).
+
+
+
+e. /$
+
+The $ at the end means that the URL ends after /books/ or /books/<book_id>/.
+
+
+
+---
+
+How it works in practice:
+
+For /books/ (list all books):
+
+The URL matches the pattern up to books/, and book_id is None.
+
+In your BookView, the logic in get checks if book_id is None and lists all books.
+
+
+For /books/5/ (get a single book with book_id=5):
+
+The URL matches the pattern books/5/, and book_id is 5.
+
+In your BookView, the logic in get handles fetching that specific book (with ID 5).
+
+
+
+
+---
