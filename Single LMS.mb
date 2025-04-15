@@ -1,0 +1,33 @@
+class BorrowReturnBookView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, book_id, action):
+        try:
+            book = Book.objects.get(id=book_id)
+
+            if action == 'borrow':
+                if book.is_borrowed:
+                    return Response({'error': 'Book already borrowed'}, status=400)
+                book.is_borrowed = True
+                book.save()
+                Borrow.objects.create(user=request.user, book=book)
+                return Response({'message': 'Book borrowed'}, status=200)
+
+            elif action == 'return':
+                borrow = Borrow.objects.get(book=book, user=request.user, return_date__isnull=True)
+                borrow.return_date = timezone.now().date()
+                borrow.save()
+                book.is_borrowed = False
+                book.save()
+                return Response({'message': 'Book returned'}, status=200)
+
+            else:
+                return Response({'error': 'Invalid action'}, status=400)
+
+        except Book.DoesNotExist:
+            return Response({'error': 'Book not found'}, status=404)
+        except Borrow.DoesNotExist:
+            return Response({'error': 'Borrow record not found'}, status=404)
+
+
+
