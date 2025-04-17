@@ -1,0 +1,52 @@
+// File: src/main.jsx import React from 'react'; import ReactDOM from 'react-dom/client'; import App from './App'; import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render( <React.StrictMode> <App /> </React.StrictMode> );
+
+// File: src/App.jsx import { BrowserRouter, Routes, Route } from 'react-router-dom'; import { useState } from 'react'; import Login from './pages/Login'; import Register from './pages/Register'; import BookList from './pages/BookList';
+
+function App() { const [token, setToken] = useState(localStorage.getItem('token') || '');
+
+return ( <BrowserRouter> <Routes> <Route path="/" element={<BookList token={token} />} /> <Route path="/login" element={<Login setToken={setToken} />} /> <Route path="/register" element={<Register />} /> </Routes> </BrowserRouter> ); }
+
+export default App;
+
+// File: src/pages/Login.jsx import { useState } from 'react'; import axios from 'axios'; import { useNavigate } from 'react-router-dom';
+
+const Login = ({ setToken }) => { const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const navigate = useNavigate();
+
+const handleLogin = async () => { try { const response = await axios.post('http://localhost:8000/login/', { username, password, }); const token = response.data.access; localStorage.setItem('token', token); setToken(token); navigate('/'); } catch (error) { alert('Login failed'); } };
+
+return ( <div className="p-4"> <h1 className="text-xl font-bold mb-4">Login</h1> <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} className="border p-2 mb-2 w-full" /> <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="border p-2 mb-4 w-full" /> <button onClick={handleLogin} className="bg-blue-500 text-white px-4 py-2 rounded"> Login </button> </div> ); };
+
+export default Login;
+
+// File: src/pages/Register.jsx import { useState } from 'react'; import axios from 'axios'; import { useNavigate } from 'react-router-dom';
+
+const Register = () => { const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [role, setRole] = useState('member'); const navigate = useNavigate();
+
+const handleRegister = async () => { try { await axios.post('http://localhost:8000/register/', { username, password, role, }); alert('Registered successfully'); navigate('/login'); } catch (error) { alert('Registration failed'); } };
+
+return ( <div className="p-4"> <h1 className="text-xl font-bold mb-4">Register</h1> <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} className="border p-2 mb-2 w-full" /> <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="border p-2 mb-2 w-full" /> <select value={role} onChange={(e) => setRole(e.target.value)} className="border p-2 mb-4 w-full" > <option value="member">Member</option> <option value="librarian">Librarian</option> </select> <button onClick={handleRegister} className="bg-green-500 text-white px-4 py-2 rounded"> Register </button> </div> ); };
+
+export default Register;
+
+// File: src/pages/BookList.jsx import { useEffect, useState } from 'react'; import axios from 'axios'; import BookCard from '../components/BookCard';
+
+const BookList = ({ token }) => { const [books, setBooks] = useState([]);
+
+const fetchBooks = async () => { try { const response = await axios.get('http://localhost:8000/books/', { headers: { Authorization: Bearer ${token}, }, }); setBooks(response.data); } catch (error) { alert('Failed to load books'); } };
+
+useEffect(() => { fetchBooks(); }, []);
+
+return ( <div className="p-4"> <h1 className="text-2xl font-bold mb-4">Library Books</h1> {books.map((book) => ( <BookCard key={book.id} book={book} token={token} onUpdate={fetchBooks} /> ))} </div> ); };
+
+export default BookList;
+
+// File: src/components/BookCard.jsx import React from 'react'; import axios from 'axios';
+
+const BookCard = ({ book, token, onUpdate }) => { const handleAction = async (action) => { try { const response = await axios.post( http://localhost:8000/books/${book.id}/borrow-return/?action=${action}, {}, { headers: { Authorization: Bearer ${token}, }, } ); alert(response.data.message); onUpdate(); } catch (err) { alert(err.response?.data?.error || 'Action failed'); } };
+
+return ( <div className="border p-4 mb-3 rounded shadow"> <h2 className="text-lg font-semibold">{book.title}</h2> <p>Author: {book.author}</p> <p>Status: {book.available ? 'Available' : 'Borrowed'}</p> {book.available ? ( <button onClick={() => handleAction('borrow')} className="bg-blue-600 text-white px-3 py-1 mt-2 rounded"> Borrow </button> ) : ( <button onClick={() => handleAction('return')} className="bg-yellow-600 text-white px-3 py-1 mt-2 rounded"> Return </button> )} </div> ); };
+
+export default BookCard;
+
