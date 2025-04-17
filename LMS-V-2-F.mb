@@ -1,0 +1,171 @@
+setup:
+npm create vite@latest my-lms-app --template react
+cd my-lms-app
+
+npm install react-router-dom axios
+
+npm run dev
+
+pip install django-cors-headers
+
+INSTALLED_APPS = [
+    # Other apps...
+    'corsheaders',
+]
+
+MIDDLEWARE = [
+    # Other middleware...
+    'corsheaders.middleware.CorsMiddleware',
+]
+
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',  # Add your React app URL here
+]
+
+src/contexts/authcontexts.js
+
+import React, { createContext, useState, useEffect } from 'react';
+
+// Create AuthContext to manage authentication
+const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [auth, setAuth] = useState({ token: localStorage.getItem('token'), isAuthenticated: false });
+
+  useEffect(() => {
+    if (auth.token) {
+      setAuth({ ...auth, isAuthenticated: true });
+    }
+  }, [auth.token]);
+
+  const login = (token) => {
+    localStorage.setItem('token', token);
+    setAuth({ token, isAuthenticated: true });
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setAuth({ token: null, isAuthenticated: false });
+  };
+
+  return (
+    <AuthContext.Provider value={{ auth, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+
+src/app.js
+import React from 'react';
+import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import Books from './pages/Books';
+import BookDetails from './pages/BookDetails';
+import Login from './pages/Login';
+import ProtectedRoute from './components/ProtectedRoute';
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <Switch>
+          <Route exact path="/login" component={Login} />
+          <ProtectedRoute exact path="/books" component={Books} />
+          <ProtectedRoute path="/books/:id" component={BookDetails} />
+        </Switch>
+      </Router>
+    </AuthProvider>
+  );
+}
+
+export default App;
+
+export default AuthContext;
+
+src/components/protectedroute.js
+
+import React, { useContext } from 'react';
+import { Route, Redirect } from 'react-router-dom';
+import AuthContext from '../contexts/AuthContext';
+
+const ProtectedRoute = ({ component: Component, ...rest }) => {
+  const { auth } = useContext(AuthContext);
+
+  return (
+    <Route
+      {...rest}
+      render={(props) =>
+        auth.isAuthenticated ? (
+          <Component {...props} />
+        ) : (
+          <Redirect to="/login" />
+        )
+      }
+    />
+  );
+};
+
+export default ProtectedRoute;
+
+
+src/pages/login.js
+import React, { useState, useContext } from 'react';
+import { useHistory } from 'react-router-dom';
+import AuthContext from '../contexts/AuthContext';
+import axios from 'axios';
+
+const Login = () => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const { login } = useContext(AuthContext);
+  const history = useHistory();
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    axios
+      .post('http://localhost:8000/login/', { username, password })
+      .then((response) => {
+        login(response.data.access);
+        history.push('/books');
+      })
+      .catch((err) => {
+        setError('Invalid credentials');
+      });
+  };
+
+  return (
+    <div>
+      <h2>Login</h2>
+      <form onSubmit={handleSubmit}>
+        <div>
+          <label>Username:</label>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+        </div>
+        <div>
+          <label>Password:</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+        <button type="submit">Login</button>
+      </form>
+    </div>
+  );
+};
+
+export default Login;
+
+src/pages/register.js
+
+
