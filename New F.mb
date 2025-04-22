@@ -1,0 +1,278 @@
+create a react app :
+npx create-react-app lms-frontend
+cd lms-frontend
+npm install axios react-router-dom jwt-decode
+
+folder structure:
+src/
+  components/
+    Navbar.jsx
+    ProtectedRoute.jsx
+  pages/
+    Login.jsx
+    Register.jsx
+    BookList.jsx
+    BookDetail.jsx
+  services/
+    api.js
+  App.js
+  index.js
+
+src/services/api.js
+  import axios from 'axios';
+
+const API = axios.create({
+  baseURL: 'http://localhost:8000', // Django backend
+});
+
+API.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export default API;
+
+src/components/protectedroute.js
+import { Navigate } from 'react-router-dom';
+
+const ProtectedRoute = ({ children }) => {
+  const token = localStorage.getItem('access_token');
+  return token ? children : <Navigate to="/login" />;
+};
+
+export default ProtectedRoute;
+
+
+src/components/Navbar.jsx
+import { Link, useNavigate } from 'react-router-dom';
+
+const Navbar = () => {
+  const navigate = useNavigate();
+  const token = localStorage.getItem('access_token');
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    navigate('/login');
+  };
+
+  return (
+    <nav style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+      <Link to="/">Books</Link>
+      {!token ? (
+        <>
+          <Link to="/login">Login</Link>
+          <Link to="/register">Register</Link>
+        </>
+      ) : (
+        <button onClick={handleLogout}>Logout</button>
+      )}
+    </nav>
+  );
+};
+
+export default Navbar;
+
+src/pages/login.jsx
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import API from '../services/api';
+
+const Login = () => {
+  const [formData, setFormData] = useState({ username: '', password: '' });
+  const navigate = useNavigate();
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await API.post('/login/', formData);
+      localStorage.setItem('access_token', res.data.access);
+      navigate('/');
+    } catch (err) {
+      alert('Login failed!');
+    }
+  };
+
+  return (
+    <div>
+      <h2>Login</h2>
+      <form onSubmit={handleSubmit}>
+        <input name="username" placeholder="Username" onChange={handleChange} required /><br />
+        <input name="password" type="password" placeholder="Password" onChange={handleChange} required /><br />
+        <button type="submit">Login</button>
+      </form>
+    </div>
+  );
+};
+
+export default Login;
+
+src/pages/register.jsx
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import API from '../services/api';
+
+const Register = () => {
+  const [formData, setFormData] = useState({ username: '', email: '', password: '' });
+  const navigate = useNavigate();
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await API.post('/register/', formData);
+      navigate('/login');
+    } catch (err) {
+      alert('Registration failed!');
+    }
+  };
+
+  return (
+    <div>
+      <h2>Register</h2>
+      <form onSubmit={handleSubmit}>
+        <input name="username" placeholder="Username" onChange={handleChange} required /><br />
+        <input name="email" placeholder="Email" onChange={handleChange} required /><br />
+        <input name="password" type="password" placeholder="Password" onChange={handleChange} required /><br />
+        <button type="submit">Register</button>
+      </form>
+    </div>
+  );
+};
+
+export default Register;
+
+src/pages/Booklist.jsx
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import API from '../services/api';
+
+const BookList = () => {
+  const [books, setBooks] = useState([]);
+
+  useEffect(() => {
+    API.get('/books/')
+      .then(res => setBooks(res.data))
+      .catch(err => console.error(err));
+  }, []);
+
+  return (
+    <div>
+      <h2>Books</h2>
+      <ul>
+        {books.map(book => (
+          <li key={book.id}>
+            <Link to={`/books/${book.id}`}>{book.title}</Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default BookList;
+
+src/pages/bookdetail.jsx
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import API from '../services/api';
+
+const BookDetail = () => {
+  const { id } = useParams();
+  const [book, setBook] = useState(null);
+
+  const fetchBook = () => {
+    API.get(`/books/${id}/`)
+      .then(res => setBook(res.data))
+      .catch(err => console.error(err));
+  };
+
+  useEffect(() => {
+    fetchBook();
+  }, [id]);
+
+  const handleBorrow = async () => {
+    try {
+      await API.post(`/books/${id}/borrow-return/?action=borrow`);
+      alert('Book borrowed!');
+      fetchBook();
+    } catch (err) {
+      alert('Error borrowing book.');
+    }
+  };
+
+  const handleReturn = async () => {
+    try {
+      await API.post(`/books/${id}/borrow-return/?action=return`);
+      alert('Book returned!');
+      fetchBook();
+    } catch (err) {
+      alert('Error returning book.');
+    }
+  };
+
+  if (!book) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <h2>{book.title}</h2>
+      <p><strong>Author:</strong> {book.author}</p>
+      <p><strong>Available:</strong> {book.available ? 'Yes' : 'No'}</p>
+
+      {book.available ? (
+        <button onClick={handleBorrow}>Borrow</button>
+      ) : (
+        <button onClick={handleReturn}>Return</button>
+      )}
+    </div>
+  );
+};
+
+export default BookDetail;
+
+src/app.js
+
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import BookList from './pages/BookList';
+import BookDetail from './pages/BookDetail';
+
+function App() {
+  return (
+    <Router>
+      <Navbar />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/" element={<ProtectedRoute><BookList /></ProtectedRoute>} />
+        <Route path="/books/:id" element={<ProtectedRoute><BookDetail /></ProtectedRoute>} />
+      </Routes>
+    </Router>
+  );
+}
+
+export default App;
+
+src/index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+
+
